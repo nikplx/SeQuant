@@ -52,6 +52,13 @@ namespace detail {
 ///        inner_pow is the optional k-aware CSV/PNO composite extent, and
 ///        batch_persistent_only restricts batching to persistent subnetworks --
 ///        all ObjectiveFunction::DenseSpaceTimeBatched only.
+/// \param target_idxs Indices that must remain open in the final result (e.g.
+///        the result indices of the expression being optimized). The cost model
+///        sizes intermediates under the assumption that these are never summed
+///        away, which matters whenever a result index occurs on more than one
+///        factor (grid or Laplace indices shared by several tensors, as in
+///        THC-like products). Empty (default) recovers the legacy behavior of
+///        inferring openness from index multiplicities alone.
 /// \param out_axes When non-null and \p Metric ==
 ///        ObjectiveFunction::DenseSpaceTimeBatched, filled with the per-node
 ///        sliced-sets of the returned sequence's contraction (\c -1) nodes, in
@@ -66,9 +73,10 @@ template <ObjectiveFunction Metric, has_index_extent IdxToSz>
 EvalSequence single_term_opt(
     TensorNetwork const& network, IdxToSz&& idxsz, bool subnet_cse,
     CostParams const& cost = {},
-    container::vector<NodeBatchAnnotation>* out_axes = nullptr) {
+    container::vector<NodeBatchAnnotation>* out_axes = nullptr,
+    IndexSet const& target_idxs = {}) {
   if (out_axes) out_axes->clear();
-  decltype(OptRes::indices) tidxs{};
+  decltype(OptRes::indices) tidxs = target_idxs;
   // Unpack the cost knobs into the names the recurrence arms below use, so the
   // arms are unchanged. (void)-cast all, since each if-constexpr arm uses only
   // a subset.
@@ -223,6 +231,8 @@ EvalSequence single_term_opt(
 ///       their semantics. All batching config (contracted/external role
 ///       predicates, \c batch_target_size, \c inner_pow, \c
 ///       batch_persistent_only) lives on \ref CostParams.
+/// \param target_idxs Indices that must remain open in the final result (see
+///       the detail overload). Empty (default) preserves the legacy behavior.
 /// \param out_axes When non-null and \p Metric ==
 ///        ObjectiveFunction::DenseSpaceTimeBatched, filled with the per-node
 ///        sliced-sets of the returned Product tree's contraction nodes, in
@@ -237,7 +247,8 @@ template <ObjectiveFunction Metric = ObjectiveFunction::DenseFLOPs,
 ExprPtr single_term_opt(
     Product const& prod, IdxToSz&& idxsz, bool subnet_cse = false,
     CostParams const& cost = {},
-    container::vector<NodeBatchAnnotation>* out_axes = nullptr) {
+    container::vector<NodeBatchAnnotation>* out_axes = nullptr,
+    IndexSet const& target_idxs = {}) {
   using ranges::views::filter;
   using ranges::views::reverse;
 
@@ -261,9 +272,9 @@ ExprPtr single_term_opt(
   }
   auto const tensors =
       prod | filter(&ExprPtr::template is<Tensor>) | ranges::to_vector;
-  auto seq = detail::single_term_opt<Metric>(TensorNetwork{tensors},
-                                             std::forward<IdxToSz>(idxsz),
-                                             subnet_cse, cost, out_axes);
+  auto seq = detail::single_term_opt<Metric>(
+      TensorNetwork{tensors}, std::forward<IdxToSz>(idxsz), subnet_cse, cost,
+      out_axes, target_idxs);
   auto result = container::svector<ExprPtr>{};
   for (auto i : seq)
     if (i == -1) {

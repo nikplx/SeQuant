@@ -9,6 +9,7 @@
 #include <SeQuant/core/eval/eval_node.hpp>
 #include <SeQuant/core/expr.hpp>
 #include <SeQuant/core/index.hpp>
+#include <SeQuant/core/io/serialization/serialization.hpp>
 #include <SeQuant/core/io/shorthands.hpp>
 #include <SeQuant/core/optimize/common_subexpression_elimination.hpp>
 #include <SeQuant/core/optimize/optimize.hpp>
@@ -501,6 +502,44 @@ TEST_CASE("optimize", "[optimize]") {
                                        ->as<Product>();
       REQUIRE(single_term_opt(GT_abij_thc)->as<Product>() == GT_abij_thc_opt);
 
+      aux->approximate_size(aux_sz);
+    }
+
+    SECTION("Single-term optimization with repeated external indices") {
+      // THC-like products share result indices across factors: here the grid
+      // indices a1/a2 and the Laplace index i1 each occur on several tensors.
+      // The optimizer must price intermediates as carrying these open indices
+      // rather than summing them away mid-network; otherwise it picks a
+      // per-grid-point outer-product tree (valid code, far more FLOPs at
+      // these sizes) over the Hadamard-factored form below.
+      auto uocc = reg->retrieve_ptr(L"a");
+      auto occ = reg->retrieve_ptr(L"i");
+      auto aux = reg->retrieve_ptr(L"x");
+      auto const uocc_sz = uocc->approximate_size();
+      auto const occ_sz = occ->approximate_size();
+      auto const aux_sz = aux->approximate_size();
+      uocc->approximate_size(1000);  // grid
+      occ->approximate_size(100);    // Laplace weight
+      aux->approximate_size(10);     // contracted legs
+
+      io::serialization::DeserializationOptions nonsymm{
+          .def_perm_symm = Symmetry::Nonsymm,
+          .def_braket_symm = BraKetSymmetry::Nonsymm,
+          .def_col_symm = ColumnSymmetry::Nonsymm};
+      auto E2 = deserialize<ResultExpr>(
+          L"E2{;;a1,a2,i1} = t{;;x1,i1} X{;;a1,x1} X{;;a2,x1} t{;;x2,i1} "
+          L"X{;;a1,x2} X{;;a2,x2}",
+          nonsymm);
+      optimize(E2);
+      auto const E2_opt = deserialize<ResultExpr>(
+          L"E2{;;a1,a2,i1} = ((t{;;x1,i1} X{;;a1,x1}) X{;;a2,x1}) "
+          L"((t{;;x2,i1} X{;;a1,x2}) X{;;a2,x2})",
+          nonsymm);
+      REQUIRE(E2.expression()->as<Product>() ==
+              E2_opt.expression()->as<Product>());
+
+      uocc->approximate_size(uocc_sz);
+      occ->approximate_size(occ_sz);
       aux->approximate_size(aux_sz);
     }
 

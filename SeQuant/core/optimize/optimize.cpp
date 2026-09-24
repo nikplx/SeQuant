@@ -92,7 +92,8 @@ void log_chosen_factorization(ExprPtr const& result,
 }
 
 /// Optimize a Product that contains only Tensor and scalar factors.
-ExprPtr opt_pure_product(Product const& prod, OptimizeOptions const& opts) {
+ExprPtr opt_pure_product(Product const& prod, OptimizeOptions const& opts,
+                         IndexSet const& target_idxs = {}) {
   bool const subnet_cse = opts.CSE.subnet;
   // Build the cost knobs field-by-field from OptimizeOptions / its BatchPolicy.
   // Batching config (both role predicates, batch_target_size, inner_pow,
@@ -123,25 +124,25 @@ ExprPtr opt_pure_product(Product const& prod, OptimizeOptions const& opts) {
   auto run = [&]() -> ExprPtr {
     if (opts.objective_function == ObjectiveFunction::DenseFLOPs)
       return opt::single_term_opt<ObjectiveFunction::DenseFLOPs>(
-          prod, opts.idx_to_extent, subnet_cse, cost);
+          prod, opts.idx_to_extent, subnet_cse, cost, nullptr, target_idxs);
     if (opts.objective_function == ObjectiveFunction::DenseSize)
       return opt::single_term_opt<ObjectiveFunction::DenseSize>(
-          prod, opts.idx_to_extent, subnet_cse, cost);
+          prod, opts.idx_to_extent, subnet_cse, cost, nullptr, target_idxs);
     if (opts.objective_function == ObjectiveFunction::DenseSpaceTime)
       return opt::single_term_opt<ObjectiveFunction::DenseSpaceTime>(
-          prod, opts.idx_to_extent, subnet_cse, cost);
+          prod, opts.idx_to_extent, subnet_cse, cost, nullptr, target_idxs);
     if (opts.objective_function == ObjectiveFunction::DenseTimeSpace)
       return opt::single_term_opt<ObjectiveFunction::DenseTimeSpace>(
-          prod, opts.idx_to_extent, subnet_cse, cost);
+          prod, opts.idx_to_extent, subnet_cse, cost, nullptr, target_idxs);
     if (opts.objective_function == ObjectiveFunction::DenseSpaceTimeBatched)
       return opt::single_term_opt<ObjectiveFunction::DenseSpaceTimeBatched>(
           prod, opts.idx_to_extent, subnet_cse, cost,
-          opts.term_batch_axes ? &node_axes : nullptr);
+          opts.term_batch_axes ? &node_axes : nullptr, target_idxs);
     SEQUANT_ASSERT(opts.objective_function ==
                    ObjectiveFunction::DenseTimeSpaceBatched);
     return opt::single_term_opt<ObjectiveFunction::DenseTimeSpaceBatched>(
         prod, opts.idx_to_extent, subnet_cse, cost,
-        opts.term_batch_axes ? &node_axes : nullptr);
+        opts.term_batch_axes ? &node_axes : nullptr, target_idxs);
   };
   ExprPtr result = run();
   if (opts.term_batch_axes) {
@@ -172,7 +173,8 @@ inline constexpr std::wstring_view placeholder_label_prefix = L"@__opt_";
 /// Optimize a Product that contains some non-Tensor, non-scalar factors by
 /// substituting placeholder tensors with target indices, optimizing the
 /// resulting tensor-only product, then swapping the originals back in.
-ExprPtr opt_mixed_product(Product const& prod, OptimizeOptions const& opts) {
+ExprPtr opt_mixed_product(Product const& prod, OptimizeOptions const& opts,
+                          IndexSet const& target_idxs = {}) {
   container::svector<ExprPtr> non_tensors(prod.size());
   container::svector<ExprPtr> new_factors;
   new_factors.reserve(prod.size());
@@ -191,7 +193,8 @@ ExprPtr opt_mixed_product(Product const& prod, OptimizeOptions const& opts) {
   }
 
   auto result = opt_pure_product(
-      Product{prod.scalar(), new_factors, Product::Flatten::No}, opts);
+      Product{prod.scalar(), new_factors, Product::Flatten::No}, opts,
+      target_idxs);
 
   auto replacer = [&non_tensors](ExprPtr& out) {
     if (!out->is<Tensor>()) return;
@@ -219,14 +222,18 @@ ExprPtr opt_mixed_product(Product const& prod, OptimizeOptions const& opts) {
 /// Recursive workhorse. \p parallel_outer controls whether the (single)
 /// outermost Sum's summands are processed in parallel; nested recursive
 /// calls always run sequentially to avoid `sequant::for_each` oversubscription.
+/// \p target_idxs are the result indices that must remain open (forwarded to
+/// the single-term optimizer); they apply to every summand of a Sum.
 ExprPtr optimize_impl(ExprPtr const& expr, OptimizeOptions const& opts,
-                      bool reorder, bool parallel_outer) {
+                      bool reorder, bool parallel_outer,
+                      IndexSet const& target_idxs = {}) {
   if (expr->is<Product>()) {
     auto const& prod = expr->as<Product>();
     bool pure = ranges::all_of(prod, [](auto&& x) {
       return x->template is<Tensor>() || x->is_scalar();
     });
-    return pure ? opt_pure_product(prod, opts) : opt_mixed_product(prod, opts);
+    return pure ? opt_pure_product(prod, opts, target_idxs)
+                : opt_mixed_product(prod, opts, target_idxs);
   }
 
   if (expr->is<Sum>()) {
@@ -236,7 +243,7 @@ ExprPtr optimize_impl(ExprPtr const& expr, OptimizeOptions const& opts,
     auto do_term = [&](std::size_t i) {
       new_smands[i] = optimize_impl(in_sum.summand(i), opts,
                                     /*reorder=*/false,
-                                    /*parallel_outer=*/false);
+                                    /*parallel_outer=*/false, target_idxs);
     };
 
     // Thread-safety of the parallel branch rests on two invariants; do NOT
@@ -344,7 +351,18 @@ OptimizeResult optimize_result(ExprPtr const& expr, OptimizeOptions opts) {
 }
 
 ResultExpr& optimize(ResultExpr& expr, OptimizeOptions opts) {
-  expr.expression() = optimize(expr.expression(), std::move(opts));
+  // The result indices must stay open throughout the evaluation; hand them to
+  // the optimizer so intermediates carrying them are sized (and priced)
+  // correctly. This only matters when a result index occurs on more than one
+  // factor (e.g. grid or Laplace indices shared by several tensors, as in
+  // THC-like products); otherwise openness follows from multiplicity alone.
+  IndexSet target_idxs;
+  if (expr.produces_tensor()) {
+    for (const Index& idx : expr.indices()) target_idxs.insert(idx);
+  }
+  expr.expression() = optimize_impl(expr.expression(), opts,
+                                    opts.reorder == ReorderSum::Reorder,
+                                    /*parallel_outer=*/true, target_idxs);
   return expr;
 }
 

@@ -880,7 +880,13 @@ auto subset_target_indices(meta::range_of<Index, 2> auto const& rng,
   for (size_t i = 0; i < result.size(); ++i) {
     if (connected && !(*connected)[i]) continue;  // pruned: result[i] unused
     for (auto&& [k, v] : counts[i])
-      if (v == 1 || (v > 0 && counts.at(counts.size() - i - 1).contains(k)))
+      // An index stays open if it occurs exactly once in this subset, if it
+      // is a global target (result indices can never be summed away
+      // mid-network, even if they occur multiple times within this subset,
+      // e.g. grid or Laplace indices shared by several factors), or if it is
+      // shared with the complementary subset.
+      if (v == 1 || ranges::contains(tixs, k) ||
+          (v > 0 && counts.at(counts.size() - i - 1).contains(k)))
         result[i].emplace(k);
   }
 
