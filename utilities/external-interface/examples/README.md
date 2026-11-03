@@ -11,7 +11,7 @@ Example invocation:
 Available examples:
 - [CCSD](./ccsd.json)
 - [NEVPT2](./nevpt2.json)
-- [THC-MP2 trace form](./thc_mp2_trace.json): staged tensor-valued results
-  (`thc/e2.inp`, `thc/w.inp`, `thc/energy.inp`) expressing the THC-based MP2
-  Coulomb term as build-`E2`, single-`W = E2·Z` contraction, trace of `W²`.
+- [MP2](./mp2.json): canonical spin-orbital MP2 energy from antisymmetrized
+  ERIs (`mp2/mp2_gd.inp`, `mp2/mp2_energy.inp`), exported both as ITF
+  (`mp2.itfaa`) and as runnable NumPy/`einsum` code (`mp2.py`).
   Run-only (no blessed-output comparison).

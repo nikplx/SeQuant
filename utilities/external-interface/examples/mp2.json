@@ -1,0 +1,98 @@
+{
+  "driver_format_version": 2,
+  "index_spaces": [
+    {
+      "label": "i",
+      "size": 50,
+      "real_valued": true
+    },
+    {
+      "label": "a",
+      "size": 200,
+      "real_valued": true
+    }
+  ],
+  "steps": [
+    {
+      "id": "input",
+      "kind": "read_input",
+      "options": {
+        "file_path": [
+          "mp2/mp2_gd.inp",
+          "mp2/mp2_energy.inp"
+        ],
+        "default_symmetry": "none"
+      },
+      "outputs": {
+        "gd": "0",
+        "en": "1"
+      }
+    },
+    {
+      "id": "optimized",
+      "kind": "optimize",
+      "inputs": "input"
+    },
+    {
+      "id": "treeify",
+      "kind": "to_export_tree",
+      "inputs": "optimized"
+    },
+    {
+      "id": "cse",
+      "kind": "cse",
+      "inputs": "treeify"
+    },
+    {
+      "kind": "export",
+      "inputs": "cse",
+      "options": {
+        "language": "itf",
+        "optimize": true,
+        "output": "mp2.itfaa",
+        "relative_order": [
+          "gd",
+          "en"
+        ],
+        "meta": {
+          "index_spaces": {
+            "a": {
+              "name": "External",
+              "tag": "e"
+            },
+            "i": {
+              "name": "Closed",
+              "tag": "c"
+            }
+          },
+          "min_index_id": 1
+        }
+      }
+    },
+    {
+      "kind": "export",
+      "inputs": "cse",
+      "options": {
+        "language": "python",
+        "optimize": true,
+        "output": "mp2.py",
+        "relative_order": [
+          "gd",
+          "en"
+        ],
+        "meta": {
+          "index_spaces": {
+            "a": {
+              "shape": "nvirt",
+              "tag": "v"
+            },
+            "i": {
+              "shape": "nocc",
+              "tag": "o"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

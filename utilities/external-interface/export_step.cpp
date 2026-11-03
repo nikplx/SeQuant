@@ -10,6 +10,7 @@
 #include <SeQuant/core/export/generation_optimizer.hpp>
 #include <SeQuant/core/export/generator.hpp>
 #include <SeQuant/core/export/itf.hpp>
+#include <SeQuant/core/export/python_einsum.hpp>
 #include <SeQuant/core/expr.hpp>
 #include <SeQuant/core/io/serialization/serialization.hpp>
 #include <SeQuant/core/space.hpp>
@@ -275,7 +276,17 @@ std::size_t ExportStep::run(std::string_view, ExecutionContext &exctx,
           genctx.rewrite(result);
 
           if (!import_name.empty()) {
-            genctx.set_import_name(result, import_name);
+            // Only some export contexts (currently ITF) support imports
+            if constexpr (requires {
+                            genctx.set_import_name(result, import_name);
+                          }) {
+              genctx.set_import_name(result, import_name);
+            } else {
+              throw Exception(
+                  "The 'imports' option is not supported for export language "
+                  "'" +
+                  language_ + "'");
+            }
           }
 
           if (created_tensors.find(result) == created_tensors.end()) {
@@ -293,7 +304,17 @@ std::size_t ExportStep::run(std::string_view, ExecutionContext &exctx,
           genctx.rewrite(result);
 
           if (!import_name.empty()) {
-            genctx.set_import_name(result, import_name);
+            // Only some export contexts (currently ITF) support imports
+            if constexpr (requires {
+                            genctx.set_import_name(result, import_name);
+                          }) {
+              genctx.set_import_name(result, import_name);
+            } else {
+              throw Exception(
+                  "The 'imports' option is not supported for export language "
+                  "'" +
+                  language_ + "'");
+            }
           }
 
           if (created_variables.find(result) == created_variables.end()) {
@@ -321,6 +342,25 @@ std::size_t ExportStep::run(std::string_view, ExecutionContext &exctx,
   if (language_ == "itf") {
     ItfGenerator<MetaAwareIftContext> generator;
     MetaAwareIftContext genctx(std::get<ItfMeta>(meta_));
+
+    if (optimize_) {
+      generated = perform_export(
+          GenerationOptimizer<decltype(generator)>(std::move(generator)),
+          genctx);
+    } else {
+      generated = perform_export(generator, genctx);
+    }
+  } else if (language_ == "python") {
+    NumPyEinsumGenerator generator;
+    NumPyEinsumGeneratorContext genctx;
+    for (const auto &[space, info] : std::get<PythonMeta>(meta_).index_spaces) {
+      if (!info.shape.empty()) {
+        genctx.set_shape(space, info.shape);
+      }
+      if (!info.tag.empty()) {
+        genctx.set_tag(space, info.tag);
+      }
+    }
 
     if (optimize_) {
       generated = perform_export(
@@ -369,6 +409,30 @@ ExportStep::meta_type ExportStep::parse_meta(std::string_view language,
         }
 
         data.idx_id_offset = value.get<std::size_t>();
+      } else {
+        throw Exception("Unknown meta data type '" + key + "' for language '" +
+                        std::string(language) + "'");
+      }
+    }
+
+    return data;
+  } else if (language == "python") {
+    PythonMeta data;
+
+    for (const auto &[key, value] : meta.items()) {
+      if (key == "index_spaces") {
+        if (!value.is_object()) {
+          throw Exception("Expected '" + key + "' to be an object");
+        }
+
+        for (const auto &[space_label, info] : value.items()) {
+          IndexSpace space(space_label);
+
+          data.index_spaces.emplace(
+              std::move(space), PythonMeta::IndexSpaceMeta{
+                                    .shape = info.value("shape", std::string{}),
+                                    .tag = info.value("tag", std::string{})});
+        }
       } else {
         throw Exception("Unknown meta data type '" + key + "' for language '" +
                         std::string(language) + "'");

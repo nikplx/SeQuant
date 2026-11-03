@@ -42,7 +42,16 @@ class ExportStep : public ProcessingStep {
     std::size_t idx_id_offset = 0;
   };
 
-  using meta_type = std::variant<std::monostate, ItfMeta>;
+  struct PythonMeta {
+    struct IndexSpaceMeta {
+      std::string shape;
+      std::string tag;
+    };
+
+    std::map<IndexSpace, IndexSpaceMeta> index_spaces;
+  };
+
+  using meta_type = std::variant<std::monostate, ItfMeta, PythonMeta>;
 
   std::string language_;
   bool optimize_ = true;

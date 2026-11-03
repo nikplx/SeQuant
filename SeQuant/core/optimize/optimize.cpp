@@ -360,6 +360,7 @@ ResultExpr& optimize(ResultExpr& expr, OptimizeOptions opts) {
   if (expr.produces_tensor()) {
     for (const Index& idx : expr.indices()) target_idxs.insert(idx);
   }
+  if (!opts.idx_to_extent) opts.idx_to_extent = default_idx_to_size();
   expr.expression() = optimize_impl(expr.expression(), opts,
                                     opts.reorder == ReorderSum::Reorder,
                                     /*parallel_outer=*/true, target_idxs);

@@ -286,6 +286,7 @@ class PythonEinsumGeneratorBase : public Generator<Context> {
   void begin_named_section(std::string_view name, const Context &) override {
     m_generated += m_indent + "def " + std::string(name) + "():\n";
     m_indent += "    ";
+    m_section_names.emplace_back(name);
   }
 
   void end_named_section(std::string_view /*name*/, const Context &) override {
@@ -306,13 +307,22 @@ class PythonEinsumGeneratorBase : public Generator<Context> {
 
   void begin_export(const Context &) override { m_generated.clear(); }
 
-  void end_export(const Context &ctx) override { (void)ctx; }
+  void end_export(const Context &ctx) override {
+    (void)ctx;
+    // Named sections are emitted as function definitions; invoke them so the
+    // generated file runs as a script without further editing.
+    for (const std::string &name : m_section_names) {
+      m_generated += name + "()\n";
+    }
+    m_section_names.clear();
+  }
 
   std::string get_generated_code() const override { return m_generated; }
 
  protected:
   std::string m_generated;
   std::string m_indent;
+  std::vector<std::string> m_section_names;
 
   /// Get the tensor name (without indices)
   std::string tensor_name(const Tensor &tensor, const Context &ctx) const {
@@ -642,6 +652,7 @@ class NumPyEinsumGenerator
 
   void begin_export(const Context &ctx) override {
     Base::m_generated.clear();
+    Base::m_section_names.clear();
     if (ctx.generate_imports()) {
       Base::m_generated += "import numpy as np\n";
       Base::m_generated += "import os\n\n";
@@ -746,6 +757,7 @@ class PyTorchEinsumGenerator
 
   void begin_export(const Context &ctx) override {
     Base::m_generated.clear();
+    Base::m_section_names.clear();
     if (ctx.generate_imports()) {
       Base::m_generated += "import torch\n";
       Base::m_generated += "import os\n\n";

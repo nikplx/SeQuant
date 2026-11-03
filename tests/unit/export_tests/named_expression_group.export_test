@@ -44,5 +44,6 @@ def test_section():
     del A_vo
     np.save('R2_vvoo.npy', R2_vvoo)
 
+test_section()
 
 =================================================

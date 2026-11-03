@@ -220,7 +220,7 @@ given, they are merged and jointly ordered before being exported together.
      - Default
      - Required
    * - :code:`language`
-     - Target language/format to export to. Currently, the only supported value is :code:`itf`.
+     - Target language/format to export to. Currently, the supported values are :code:`itf` and :code:`python` (NumPy :code:`einsum` code).
      - -
      - Yes
    * - :code:`output`
@@ -269,6 +269,27 @@ For :code:`language: itf`, :code:`meta` accepts the following properties:
    * - :code:`min_index_id`
      - Non-negative integer offset that index IDs emitted into the generated ITF code start counting from.
      - 0
+     - No
+
+
+For :code:`language: python`, :code:`meta` accepts the following properties:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Option
+     - Description
+     - Default
+     - Required
+   * - :code:`index_spaces`
+     - Object mapping an index space's label to an object with :code:`shape` and :code:`tag` properties. The shape is
+       the Python expression used for the extent of that space (typically a variable name such as :code:`nocc` defined
+       by the caller); the tag is appended to tensor names to distinguish blocks. Spaces not listed here (or fields
+       left unset for a listed space) fall back to built-in defaults (:code:`dim_<label>` shapes and the first
+       character of the label as tag). Input files are read in the rewritten (layout-optimal) axis order of each
+       tensor, which may differ from the order written in the input equations when the tensor has symmetries; the
+       axis order to use is the one shown by the generated :code:`einsum` subscripts for that tensor.
+     - :code:`{}`
      - No
 
 
